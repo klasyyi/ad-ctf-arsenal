@@ -1,0 +1,28 @@
+# Runtime flag database and queue
+*.db
+*.sqlite
+*.sqlite3
+flags_queue.txt
+targets_runtime.txt
+
+# Traffic and logs
+*.pcap
+*.pcapng
+*.log
+traffic_l7.log
+php_waf_traffic.log
+php_blocked_attacks.log
+captured_exploits/
+
+# Python cache & venv
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# Temporary / OS
+.DS_Store
+*.swp
+*~

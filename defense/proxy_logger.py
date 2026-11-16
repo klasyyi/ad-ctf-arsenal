@@ -33,15 +33,20 @@ def forward(src_sock, dst_sock, client_ip, direction, log_file):
             dst_sock.sendall(data)
         except Exception:
             break
-    src_sock.close()
-    dst_sock.close()
+    try:
+        dst_sock.shutdown(socket.SHUT_WR)
+    except Exception:
+        pass
 
 def handle_client(client_sock, client_addr, target_host, target_port, log_file):
     try:
         target_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         target_sock.connect((target_host, target_port))
     except Exception:
-        client_sock.close()
+        try:
+            client_sock.close()
+        except Exception:
+            pass
         return
 
     t_in = threading.Thread(target=forward, args=(client_sock, target_sock, client_addr[0], "CLIENT -> BACKEND", log_file))
@@ -50,6 +55,20 @@ def handle_client(client_sock, client_addr, target_host, target_port, log_file):
     t_out.daemon = True
     t_in.start()
     t_out.start()
+
+    def cleanup():
+        t_in.join(timeout=10)
+        t_out.join(timeout=10)
+        try:
+            client_sock.close()
+        except Exception:
+            pass
+        try:
+            target_sock.close()
+        except Exception:
+            pass
+
+    threading.Thread(target=cleanup, daemon=True).start()
 
 def main():
     parser = argparse.ArgumentParser(description="Zero-firewall L7 proxy logger")

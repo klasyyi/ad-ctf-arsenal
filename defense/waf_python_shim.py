@@ -9,22 +9,36 @@ from waf_python_shim import register_waf
 app = Flask(__name__)
 register_waf(app)
 ================================================================================
+Mode (env var WAF_MODE):
+  "monitor" (default) - log matches, NEVER block. Attack/defense SLA-safe:
+      a false positive can only cost you the log line, never the service check.
+  "block"             - additionally return 403 on a match. Use only once you
+      have watched the monitor log and trust the patterns against the real
+      checker traffic. Blocking CAN fail SLA on a false positive; there is no
+      "safe" fake-200, the checker needs the real response body.
+
+Deliberately NOT matched: the flag format itself. The organizer SLA checker
+plants and reads flags through your legit endpoints, so its traffic contains
+the flag string. Matching on it blocks the checker and loses SLA.
+================================================================================
 """
 
+import os
 import re
 import json
 from datetime import datetime
-from flask import request, abort, Response
+from flask import request, abort
 
 LOG_FILE = "/tmp/flask_waf_traffic.log"
 BLOCKED_LOG = "/tmp/flask_waf_blocked.log"
+
+WAF_MODE = os.environ.get("WAF_MODE", "monitor").lower()  # "monitor" or "block"
 
 BAD_PATTERNS = [
     re.compile(r"union\s+select", re.IGNORECASE),
     re.compile(r"\/\.\.\/"),
     re.compile(r"(cat|head|tail|more|less|tac)\s+.*flag", re.IGNORECASE),
     re.compile(r"\{\{.*config.*\}\}"),  # SSTI Jinja2
-    re.compile(r"flag\{", re.IGNORECASE),
 ]
 
 def register_waf(app):
@@ -58,8 +72,17 @@ def register_waf(app):
         full_payload = f"{path} {json.dumps(query)} {body}"
         for pattern in BAD_PATTERNS:
             if pattern.search(full_payload):
-                with open(BLOCKED_LOG, "a") as f:
-                    f.write(f"[{datetime.now()}] Blocked {pattern.pattern} from {client_ip}\n")
-                
-                # Safe response: 200 OK so SLA checker doesn't trigger a failure alarm
-                return Response("OK", status=200)
+                verb = "BLOCKED" if WAF_MODE == "block" else "WOULD-BLOCK"
+                try:
+                    with open(BLOCKED_LOG, "a") as f:
+                        f.write(f"[{datetime.now()}] {verb} {pattern.pattern} from {client_ip}\n")
+                except Exception:
+                    pass
+
+                # Only drop the request in block mode. In monitor mode we log and
+                # fall through so legit/checker traffic always gets the real app
+                # response. 403 is honest: a fake 200 still fails SLA on a false
+                # positive (checker expects real content, not "OK").
+                if WAF_MODE == "block":
+                    abort(403)
+                break

@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
 """
+============================================================================
+EXPIRED - DO NOT RUN WHEN USING S4DFARM
+============================================================================
+S4DFarm (s4dfarm_engine/) is the flag submitter now: its server dedups,
+quota-limits and submits. Running this daemon alongside it double-submits.
+Kept only as a break-glass fallback if the S4DFarm server is unavailable.
+
+Known bug if you do fall back: a flag that returns ERROR or UNKNOWN
+(scoreboard timeout/down) is still recorded, so is_flag_processed() skips it
+forever - transient flags are lost, never retried. S4DFarm's QUEUED status
+retries them correctly, which is the main reason to prefer the farm.
+============================================================================
+
 Flag Submission Daemon
 Reads flags from flags_queue.txt, submits them to the scoreboard,
 and stores results in SQLite to prevent duplicate submissions.

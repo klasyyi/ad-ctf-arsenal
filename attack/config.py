@@ -1,55 +1,45 @@
 """
 ================================================================================
-CENTRAL CONFIGURATION FILE
+CENTRAL CONFIGURATION  (single-source)
 ================================================================================
-This is the ONLY configuration file you need to edit at the start of the match.
-All scripts automatically read their settings from here.
+The flag format, team IPs and service ports now live in ONE file:
+
+    s4dfarm_engine/server/app/config.py
+
+That is the file the S4DFarm server already reads, so match-day config is a
+single edit there. This module imports the shared values from it, so the arsenal
+tools (exploit_replay.py, traffic/sniffer.py, and the EXPIRED standalone attack
+scripts) keep working unchanged - they still do `from config import ...`.
+
+Only the standalone submitter_daemon's scoreboard settings stay in this file,
+because under S4DFarm the server submits through its own SYSTEM_PROTOCOL and the
+standalone submitter is EXPIRED (break-glass fallback only).
 ================================================================================
 """
+import os
+import importlib.util
 
-# ---------------------------------------------------------------------------
-# 1. SCOREBOARD & FLAG SUBMISSION
-# Get these from the competition portal at 10:00 AM.
-# ---------------------------------------------------------------------------
-# Protocol options: "HTTP_JSON", "HTTP_FORM", "TCP_SOCKET"
-SUBMISSION_PROTOCOL = "HTTP_JSON"
+# ---- load the single source: server/app/config.py, by absolute path so it
+#      resolves no matter what directory a tool is launched from ----
+_here = os.path.dirname(os.path.abspath(__file__))
+_server_config = os.path.join(_here, "..", "s4dfarm_engine", "server", "app", "config.py")
+_spec = importlib.util.spec_from_file_location("farm_server_config", _server_config)
+_farm = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_farm)
 
-# For HTTP_JSON or HTTP_FORM:
+# ---- shared values (edit these in server/app/config.py, NOT here) ----
+FLAG_REGEX_STR = _farm.FLAG_FORMAT      # same string the farm server extracts with
+WEB_PORT = _farm.WEB_PORT
+WEB_PATH = _farm.WEB_PATH
+PWN_PORT = _farm.PWN_PORT
+MY_TEAM_IP = _farm.MY_TEAM_IP
+PER_TARGET_SLEEP = _farm.PER_TARGET_SLEEP
+TICK_DURATION = _farm.TICK_DURATION
+
+# ---- standalone submitter_daemon ONLY (EXPIRED; the farm submits via the
+#      server's SYSTEM_PROTOCOL, so these are unused under S4DFarm) ----
+SUBMISSION_PROTOCOL = "HTTP_JSON"       # "HTTP_JSON", "HTTP_FORM", "TCP_SOCKET"
 SUBMIT_URL = "http://scoreboard.ctf/api/submit"
 TEAM_TOKEN = "YOUR_TEAM_TOKEN_HERE"
-
-# For TCP_SOCKET (if competition uses raw socket submission, e.g. nc host port):
 TCP_SUBMIT_HOST = "scoreboard.ctf"
 TCP_SUBMIT_PORT = 31337
-
-# ---------------------------------------------------------------------------
-# 2. YOUR TEAM IDENTITY
-# Your team IP will be SKIPPED during attacks so you never attack yourself.
-# ---------------------------------------------------------------------------
-MY_TEAM_IP = "10.60.5.1"
-
-# ---------------------------------------------------------------------------
-# 3. SERVICE PORTS & PATHS
-# Update ports and paths once challenge services are announced.
-# ---------------------------------------------------------------------------
-WEB_PORT = 8080
-WEB_PATH = "/api/v1/profile"
-
-PWN_PORT = 9999
-
-# ---------------------------------------------------------------------------
-# 4. TIMING & THROTTLING
-# ---------------------------------------------------------------------------
-# Round/tick sleep duration in seconds (matches game tick rate, e.g. 120 or 180)
-TICK_DURATION = 120
-
-# Mandatory per-target delay in seconds (must be >= 2.0 to comply with anti-DDoS rule)
-PER_TARGET_SLEEP = 2.1
-
-# ---------------------------------------------------------------------------
-# 5. FLAG PATTERN
-# Regex matching the competition flag format.
-# Verify format at game start (e.g. check prefix like FLAG{ or CTF{,
-# and check length boundaries {16,64} if flags are shorter/longer).
-# ---------------------------------------------------------------------------
-FLAG_REGEX_STR = r"(?:FLAG|CTF)\{[A-Za-z0-9_\-]{8,64}\}|[A-Z0-9]{32}="

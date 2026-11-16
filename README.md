@@ -1,142 +1,296 @@
-# AD-CTF Arsenal: 24-Hour Attack & Defense Automation Framework
+# AD-CTF Arsenal + S4DFarm
 
-Lightweight, production-grade automation suite for 24-hour Attack & Defense CTF competitions. Compliant with strict competition rules: zero AI, zero firewall/iptables changes, no port scanning, and mandatory >=2.0s rate limiting.
+An operational framework for 24-hour Attack & Defense CTFs, built to run entirely
+inside the organizer "Pwnbox" (Debian + a fixed toolset + Docker via `docker.sock`).
+It pairs two things:
+
+- **S4DFarm** (`s4dfarm_engine/`) — the automated exploit runner and flag submitter.
+  Vendored from upstream [C4T-BuT-S4D/S4DFarm](https://github.com/C4T-BuT-S4D/S4DFarm)
+  (LICENSE kept intact). This is the engine that attacks every team every tick and
+  submits the flags.
+- **The arsenal** (`attack/`, `defense/`, `traffic/`, `s4dfarm/`, `manual/`) — the
+  exploits S4DFarm runs, plus everything S4DFarm does not do: defense, traffic
+  capture, replay, and the field manuals.
+
+Built for environments that prohibit AI tooling, firewall changes, and port
+scanning, and that enforce a per-target rate limit.
 
 ---
 
-## Quickstart (Inside Pwnbox)
+## How it works (the loop)
 
-```bash
-git clone https://github.com/klasyyi/ad-ctf-arsenal.git
-cd ad-ctf-arsenal
-chmod +x bootstrap/setup_pwnbox.sh && ./bootstrap/setup_pwnbox.sh
-source ~/.bashrc
-tmux
-```
+One S4DFarm server runs on the shared Pwnbox. Each vulnerable service has one small
+exploit script. The farm does the repetitive work: it runs each exploit against
+every enemy team on every tick, collects whatever the exploit prints, deduplicates,
+applies the submission quota, and submits to the scoreboard.
 
----
-
-## What to Configure at 10:00 AM (The Only 2 Files to Edit)
-
-### 1. `attack/config.py` (Central Configuration)
-Open with: `nano attack/config.py`
-```python
-# 1. Submission protocol: "HTTP_JSON", "HTTP_FORM", or "TCP_SOCKET"
-SUBMISSION_PROTOCOL = "HTTP_JSON"
-SUBMIT_URL = "http://scoreboard.ctf/api/submit"  # Portal URL
-TEAM_TOKEN = "YOUR_TEAM_TOKEN_HERE"              # Private team key
-
-# 2. Your team IP (skipped during attacks)
-MY_TEAM_IP = "10.60.5.1"
-
-# 3. Service ports
-WEB_PORT = 8080
-WEB_PATH = "/api/v1/profile"
-PWN_PORT = 9999
-
-# 4. Tick duration in seconds (e.g. 120 for 2-min ticks, 180 for 3-min ticks)
-TICK_DURATION = 120
-```
-
-### 2. `attack/targets.txt` (List of Enemy Targets)
-Open with: `nano attack/targets.txt`
-Paste the opposing team IPs or hostnames (one per line). Omit or comment out your own IP.
 ```text
-10.60.1.1
-10.60.2.1
-10.60.3.1
-...
+S4DFarm server (one, shared on the Pwnbox)
+│
+├─ [ONCE] farm owner configures and boots it
+│     server/app/config.py: TEAMS, FLAG_FORMAT, SYSTEM_PROTOCOL + token, quota
+│     docker compose up --build -d   ->  web UI on http://localhost:5000
+│
+└─ [EVERY TICK] one branch per service, run by its owner
+      s4dfarm/exploit_<service>.py   (payload only: print flag(s), exit)
+          │  start_sploit.py runs it against every team from TEAMS
+          ▼
+      prints FLAG{...} to stdout
+          │
+          ▼
+   SERVER: extract (FLAG_FORMAT) -> dedup -> quota -> submit -> UI stats
+```
+
+Your job as a service owner is **one exploit file and one client command**. You
+never loop over teams, never retype IPs, never submit flags yourself — the farm
+owns all of that.
+
+---
+
+## Team roles
+
+Everyone works on the **same** Pwnbox, so roles exist to stop people stepping on
+each other. Run everything in one shared tmux session (`tmux new -s ctf`, others
+`tmux attach -t ctf`) with one window per role.
+
+| Role | Owns | Responsibilities |
+| --- | --- | --- |
+| **Farm owner** | The S4DFarm server | Sets `TEAMS`, `FLAG_FORMAT`, protocol, quota once; boots the server; is the only person who edits server config or restarts it; watches the UI for accepted/rejected trends. |
+| **Service owner** (one per service) | One `s4dfarm/exploit_<service>.py` + its client | Writes and tunes that service's exploit; starts one client for it; re-adapts when a target patches. Edits only their own files. |
+| **Defense owner** (one per service you run) | Your own service's source + container | Diffs clean vs patched, applies the fix, rebuilds, keeps a known-good image, runs the WAF shim. Only this person rebuilds the service. |
+| **Traffic / replay** | `traffic/` + `attack/exploit_replay.py` | Captures incoming enemy exploits, hands new exploits to service owners, fires captured exploits back at every team. |
+
+Single-owner, shared resources: the farm server, `TEAMS`, and `FLAG_FORMAT` belong
+to the farm owner only. Never run two servers, never run two clients for the same
+service, never edit another person's exploit, never rebuild a service without a
+shout.
+
+---
+
+## Repository structure
+
+```text
+ad-ctf-arsenal/
+├── README.md
+├── s4dfarm_engine/              # Vendored S4DFarm engine (upstream C4T-BuT-S4D/S4DFarm)
+│   ├── server/                  #   farm server: web UI, dedup, quota, submission
+│   │   └── app/
+│   │       ├── config.py        #     THE single source: TEAMS, FLAG_FORMAT, ports, protocol, quota
+│   │       └── protocols/       #     submission protocols (one module per scoreboard)
+│   │           ├── faust.py ... volgactf.py   # shipped protocols
+│   │           ├── custom.py    #     TEMPLATE: edit for a custom scoreboard
+│   │           └── stub.py      #     testing: accepts all, submits nowhere
+│   └── client/
+│       └── start_sploit.py      #   runs one exploit against all teams each tick
+├── s4dfarm/                     # Adapter: the exploits S4DFarm runs
+│   ├── exploit_web.py           #   web sploit (print flags to stdout, exit)
+│   ├── exploit_pwn.py           #   pwn sploit (print flags to stdout, exit)
+│   ├── config.py                #   derives FLAG_REGEX + ports from the server config
+│   └── INTEGRATION.md           #   full wiring notes
+├── attack/
+│   ├── config.py                # derives shared values from server config (EXPIRED submitter fields local)
+│   ├── exploit_replay.py        # Replay a captured enemy payload (manual, keep)
+│   ├── submitter_daemon.py      # EXPIRED under S4DFarm (break-glass fallback only)
+│   ├── exploit_web.py           # EXPIRED round-loop version (break-glass fallback)
+│   ├── exploit_pwn.py           # EXPIRED round-loop version (break-glass fallback)
+│   └── targets.txt              # Standalone target list (farm uses server TEAMS instead)
+├── defense/
+│   ├── backup_services.sh       # Snapshot + git-init your services
+│   ├── bot_watcher.sh           # Watch the organizer SLA bot
+│   ├── proxy_logger.py          # Layer 7 proxy logger (no firewall change)
+│   ├── waf_python_shim.py       # Flask WAF shim (monitor by default)
+│   └── waf_php_shim.php         # PHP WAF shim (monitor by default)
+├── traffic/
+│   ├── sniffer.py               # Packet sniffer + exploit dumper
+│   └── pcap_dump.sh             # Rolling tcpdump ring buffer
+└── manual/
+    ├── FIRST_HOUR_CHECKLIST.md
+    ├── GAME_DYNAMICS_AND_CHEATCODES.md
+    ├── FIELD_MANUAL.md
+    └── PLAYBOOK.md
 ```
 
 ---
 
-## Step-by-Step Match Day Protocol (From 10:00 AM)
+## Setup checklist
 
-### Step 1: Boot & Arm (00:00 - 00:05)
-Open the Pwnbox terminal and run:
+### A. The one file — `s4dfarm_engine/server/app/config.py` (farm owner, once)
+
+This is the **single source of truth**. The farm reads it natively; the arsenal
+tools (`attack/config.py` → `s4dfarm/config.py`, plus `defense/` and `traffic/`)
+import the shared values from it. Edit here and nowhere else.
+
+1. `TEAMS` — the real `{name: ip}` of every target team. The only team list.
+2. `FLAG_FORMAT` — the real flag regex from the rules. Shared with every tool, so
+   the flag pattern is set here only (no second copy to keep in sync).
+   Set here too, shared with the exploits: `WEB_PORT` / `WEB_PATH`, `PWN_PORT`, and
+   — for the standalone/replay tools — `MY_TEAM_IP`, `PER_TARGET_SLEEP`,
+   `TICK_DURATION`.
+3. `SYSTEM_PROTOCOL` — how flags reach the scoreboard. Choose one:
+   - a shipped module: `faust`, `ructf_http`, `ructf_tcp`, `ctf_moscow`,
+     `ctfcup_tcp`, `volgactf`;
+   - `custom` — edit `server/app/protocols/custom.py` for the organizers' own
+     scoreboard (see "Custom scoreboard" below);
+   - `stub` — the default; accepts every flag and submits nowhere, for testing the
+     pipeline before the scoreboard spec is known. **Change it before the real game.**
+   Then set only the keys that protocol reads (`SYSTEM_URL` / `SYSTEM_HOST` /
+   `SYSTEM_PORT` / `TEAM_TOKEN` / `SYSTEM_TOKEN`).
+4. `SUBMIT_FLAG_LIMIT` / `SUBMIT_PERIOD` — the game's submission quota.
+5. `FLAG_LIFETIME` — how long a flag stays valid.
+6. `SERVER_PASSWORD` — change it from the default.
+7. `TIMEZONE` — set to the game's timezone.
+
+### B. Adapter — `s4dfarm/` (service owners)
+
+No config to edit here. `s4dfarm/config.py` and `attack/config.py` import the
+flag pattern and ports from the one file in section A, so there is nothing to
+keep in sync by hand — change a value in `server/app/config.py` and every tool
+and sploit picks it up on next launch.
+
+8. Leave `s4dfarm/config.py` and `attack/config.py` alone — they derive their
+   values from `server/app/config.py`. (Only the EXPIRED standalone submitter's
+   scoreboard fields still sit in `attack/config.py`, and you don't run it under
+   the farm.)
+9. Per service: write the payload block in your `s4dfarm/exploit_<service>.py`.
+   Contract: `argv[1]` is the victim host, steal the flag(s), `print()` each one,
+   exit. No loop, no submitter — the farm owns those.
+
+### C. Defense (each service you run)
+
+10. Prepend the WAF shim to your service, in monitor mode first.
+11. Tag a known-good Docker image once SLA is green (your fast rollback).
+12. Start the sniffer and bot watcher.
+
+---
+
+## Important commands
+
+### Clone and bootstrap (every teammate, on the Pwnbox)
+
 ```bash
 git clone https://github.com/klasyyi/ad-ctf-arsenal.git
 cd ad-ctf-arsenal
 chmod +x bootstrap/setup_pwnbox.sh && ./bootstrap/setup_pwnbox.sh
 source ~/.bashrc
-tmux
+tmux new -s ctf      # others: tmux attach -t ctf
 ```
 
-### Step 2: Lock Down & Launch Radars (00:05 - 00:15)
-Do not modify any challenge code yet. Run these background defenses:
+### Start the farm (farm owner, once)
+
 ```bash
-# 1. Snapshot all services and enable Git rollback
-sudo ./defense/backup_services.sh
+cd s4dfarm_engine
+docker compose up --build -d
+# web UI: http://localhost:5000  (log in with SERVER_PASSWORD)
+```
 
-# 2. Check network interface name (eth0, ens3, etc.)
-ip a
+### Run an exploit (service owner, one client per service)
 
-# 3. Start central flag submitter daemon
-python3 attack/submitter_daemon.py &
+```bash
+python3 s4dfarm_engine/client/start_sploit.py s4dfarm/exploit_web.py \
+    --server-url http://127.0.0.1:5000 --server-pass YOUR_PASS
 
-# 4. Start Radar 2 (Enemy Packet Sniffer)
-sudo python3 traffic/sniffer.py eth0 &
+python3 s4dfarm_engine/client/start_sploit.py s4dfarm/exploit_pwn.py \
+    --server-url http://127.0.0.1:5000 --server-pass YOUR_PASS
+# add --attack-period <seconds> if the tick is short
+```
 
-# 5. Start Radar 1 (Organizer Bot Watcher)
+Quick local test of an exploit, outside the farm:
+
+```bash
+python3 s4dfarm/exploit_web.py 127.0.0.1    # should print a flag
+```
+
+### Defense
+
+```bash
+# Snapshot + git-init your services (once, first 15 minutes)
+chmod +x defense/backup_services.sh && sudo ./defense/backup_services.sh
+
+# WAF shim: monitor mode is the default (logs, never blocks).
+# Watch for would-be blocks, confirm no SLA-checker traffic is caught:
+tail -f /tmp/flask_waf_blocked.log       # or /tmp/php_blocked_attacks.log
+# Only once the patterns are safe, enable blocking for your service:
+WAF_MODE=block <start your service>
+
+# Watch the organizer SLA bot
 chmod +x defense/bot_watcher.sh && ./defense/bot_watcher.sh &
 ```
-*Check scoreboard: Confirm your services start GREEN.*
 
-### Step 3: Discover Flag Sink & Endpoints (00:15 - 00:30)
-1. Check output in the Bot Watcher window:
-   - Note the active URLs visited by the bot (e.g. `POST /api/notes`, `GET /profile`).
-   - Identify where the flag is placed (database table, `/flag.txt`, etc.).
-2. Update `attack/config.py` with the ports and paths discovered.
+### Patch and roll back a service (defense owner)
 
-### Step 4: Attack Execution & Replay (00:30 Onward)
-1. Launch custom web or binary attacks:
-   ```bash
-   python3 attack/exploit_web.py
-   python3 attack/exploit_pwn.py
-   ```
-   *Optional CLI overrides: `python3 attack/exploit_web.py --port 5000 --path /api`*
+```bash
+# Before patching, pin the working state both ways:
+git add -A && git commit -m "known-good baseline"
+docker tag <service>:latest <service>:good
 
-2. Counter-strike using enemy zero-days:
-   When `traffic/sniffer.py` alerts an enemy attack, replay their exact payload:
-   ```bash
-   python3 attack/exploit_replay.py traffic/captured_exploits/<latest_dump>.bin --port 8080
-   ```
-   *All captured flags are automatically piped into flags_queue.txt and submitted.*
+# Patch on a branch, one commit per change, then deploy:
+git switch -c patch-<bug>
+# ...edit source...
+git commit -am "patch <bug>"
+docker compose up -d --build
 
-### Step 5: Surgical Defense (Preserve SLA)
-- Never return HTTP 500 or crash services.
-- Apply length limits to input parameters:
-  ```php
-  if (strlen($_POST['input']) > 32) { die("OK"); }
-  ```
-- Force type-casting on IDs:
-  ```php
-  $id = intval($_GET['id']);
-  ```
-- If a patch breaks SLA, immediately rollback with:
-  ```bash
-  cd /path/to/service && git checkout .
-  ```
+# If SLA goes red, roll the runtime back in seconds (no rebuild):
+docker tag <service>:good <service>:latest
+docker compose up -d --force-recreate --no-build
 
----
+# Then fix in git without clock pressure:
+git diff known-good..patch-<bug>
+# re-tag :good when SLA is green again
+```
 
-## File Action Reference
+### Traffic and replay
 
-| File | Match Day Action |
-| :--- | :--- |
-| `attack/config.py` | Edit: Set `SUBMIT_URL`, `TEAM_TOKEN`, `MY_TEAM_IP`, `WEB_PORT`, `PWN_PORT`. |
-| `attack/targets.txt` | Edit: Paste list of opposing team IPs. |
-| `attack/exploit_web.py` | Run or edit: Customize payload in `attack_team()`. |
-| `attack/exploit_pwn.py` | Run or edit: Customize payload in `attack_team()`. |
-| `bootstrap/setup_pwnbox.sh` | Run only: `./setup_pwnbox.sh`. |
-| `defense/backup_services.sh`| Run only: `./backup_services.sh`. |
-| `defense/bot_watcher.sh` | Run only: `./bot_watcher.sh`. |
-| `traffic/sniffer.py` | Run only: `python3 sniffer.py <iface>`. |
+```bash
+# Capture incoming enemy exploits
+sudo python3 traffic/sniffer.py eth0 &
+chmod +x traffic/pcap_dump.sh && ./traffic/pcap_dump.sh &
+
+# Fire a captured enemy exploit back at everyone
+python3 attack/exploit_replay.py traffic/captured_exploits/<file>.bin --port 8080
+```
+
+### Custom scoreboard
+
+If the organizers run their own submission system and no shipped protocol fits,
+edit the template, point the config at it, and restart:
+
+```bash
+# 1. edit the request + response parsing
+nano s4dfarm_engine/server/app/protocols/custom.py
+# 2. in server/app/config.py set  'SYSTEM_PROTOCOL': 'custom'  + its keys
+# 3. restart the server
+cd s4dfarm_engine && docker compose up --build -d
+```
+
+In any protocol, map flag verdicts carefully: `ACCEPTED` = scored, `REJECTED` =
+permanently dead, `QUEUED` = transient (retried next tick). When unsure, use
+`QUEUED` — a wrongly rejected flag is a lost point.
 
 ---
 
-## Core Rules Compliance
-- Anti-DDoS Throttling: All attack runners enforce `time.sleep(2.1)` per target.
-- Zero Firewall Changes: All defense tools operate strictly at Layer 7.
-- Non-Destructive: Exploits only read flags; no crashing or disrupting enemy services.
-- Internal Sniffing Only: Captures restricted strictly to local assigned interfaces (`eth0`, `docker0`).
+## Retired under S4DFarm
+
+When S4DFarm is the exploiter and submitter, do **not** run these — they
+double-submit or fight the farm:
+
+- `attack/submitter_daemon.py`
+- the round-loop `attack/exploit_web.py` / `attack/exploit_pwn.py`
+  (use `s4dfarm/exploit_web.py` / `s4dfarm/exploit_pwn.py` instead)
+
+They are kept only as a standalone fallback if the farm is unavailable.
+
+---
+
+## Rules compliance
+
+- **Rate limit:** the S4DFarm client re-attacks a target only once per
+  `--attack-period` (default 55s), so per-target spacing is far above any 2.1s
+  minimum without any in-exploit sleep.
+- **Zero firewall changes:** all defense runs at Layer 7 (application code, local
+  proxies, the WAF shim).
+- **Non-destructive:** exploits only read flags; they do not crash or disrupt enemy
+  services.
+- **Internal sniffing only:** capture is restricted to local host interfaces.
+
+Credit for the vendored engine: upstream
+[C4T-BuT-S4D/S4DFarm](https://github.com/C4T-BuT-S4D/S4DFarm).

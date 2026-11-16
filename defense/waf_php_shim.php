@@ -9,8 +9,20 @@
  * Option B: At line 1 of index.php:
  *   require_once __DIR__ . '/waf_php_shim.php';
  * ==============================================================================
+ * Mode (env var WAF_MODE):
+ *   "monitor" (default) - log matches, NEVER block. A false positive costs only
+ *       a log line, never the SLA check.
+ *   "block"             - additionally 403 on a match. Use only after watching
+ *       the monitor log against real checker traffic. Blocking CAN fail SLA on a
+ *       false positive; a fake 200 does not help, the checker needs real content.
+ *
+ * Deliberately NOT matched: the flag format itself. The organizer SLA checker
+ * plants and reads flags through legit endpoints, so matching on the flag string
+ * blocks the checker and loses SLA.
+ * ==============================================================================
  */
 
+$waf_mode = strtolower(getenv('WAF_MODE') ?: 'monitor'); // "monitor" or "block"
 $log_file = '/tmp/php_waf_traffic.log';
 
 // 1. Capture request context
@@ -33,25 +45,31 @@ $bad_signatures = [
     '/\/\.\.\//',                                      // Path traversal
     '/(system|exec|passthru|shell_exec|popen)\s*\(/i', // Dangerous sinks
     '/(cat|head|tail|more|less|tac)\s+.*flag/i',        // Shell flag reading
-    '/flag\{/i'
 ];
 
 $raw_str = serialize($_GET) . serialize($_POST) . $request_data['raw_body'];
 
 foreach ($bad_signatures as $pattern) {
     if (preg_match($pattern, $raw_str)) {
-        file_put_contents('/tmp/php_blocked_attacks.log', 
-            sprintf("[%s] Blocked signature %s from %s\n", 
-                date('Y-m-d H:i:s'), 
+        $verb = ($waf_mode === 'block') ? 'BLOCKED' : 'WOULD-BLOCK';
+        file_put_contents('/tmp/php_blocked_attacks.log',
+            sprintf("[%s] %s signature %s from %s\n",
+                date('Y-m-d H:i:s'),
+                $verb,
                 $pattern,
                 $request_data['remote_ip']
-            ), 
+            ),
             FILE_APPEND
         );
 
-        // SAFE DEFENSE: Return 200 OK so SLA checker does not fail with 500 error!
-        header('HTTP/1.1 200 OK');
-        die('Request completed.');
+        // Only drop the request in block mode. In monitor mode log and fall
+        // through so legit/checker traffic always gets the real app response.
+        // 403 is honest: a fake 200 still fails SLA on a false positive.
+        if ($waf_mode === 'block') {
+            http_response_code(403);
+            die('Forbidden.');
+        }
+        break;
     }
 }
 ?>

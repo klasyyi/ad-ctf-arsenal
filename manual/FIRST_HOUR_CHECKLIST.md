@@ -43,7 +43,7 @@ Do not touch or modify any challenge code yet.
    - Identify active endpoints called by the SLA bot (e.g., `POST /api/notes`, `GET /profile`).
    - Identify flag format and storage location (database table, `/flag.txt`, etc.).
 2. Configure the 2 core files:
-   - In `attack/submitter_daemon.py`: Set `SUBMIT_URL` and `TEAM_TOKEN`.
+   - In `attack/config.py`: Set `SUBMISSION_PROTOCOL`, `SUBMIT_URL`, `TEAM_TOKEN`, `MY_TEAM_IP`, and service ports.
    - In `attack/targets.txt`: Paste opposing team IPs (omit your own IP).
 
 ## 00:30 - 01:00: Role Assignment & Initial Exploitation
@@ -53,7 +53,7 @@ Do not touch or modify any challenge code yet.
 2. Player 2 (Attack Lead):
    - Target active endpoints spotted by the Bot Watcher.
    - Test basic injections on localhost (SQLi, IDOR, Path Traversal).
-   - Once working, set `SERVICE_PORT` and `params` in `attack/exploit_web.py` and run against all teams.
+   - Once working, test payload in `attack/exploit_web.py` and run against all teams.
 3. Player 3 (Reverser):
    - Load binary challenges into Ghidra.
    - Locate vulnerable functions and draft surgical patches.

@@ -16,31 +16,36 @@ tmux
 
 ---
 
-## What to Configure at 10:00 AM (The Only 3 Files to Edit)
+## What to Configure at 10:00 AM (The Only 2 Files to Edit)
 
-### 1. `attack/submitter_daemon.py`
-Set scoreboard API endpoint and team secret token:
+### 1. `attack/config.py` (Central Configuration)
+Open with: `nano attack/config.py`
 ```python
-SUBMIT_URL = "http://scoreboard.ctf/api/submit"  # Submission URL from portal
-TEAM_TOKEN = "YOUR_TEAM_TOKEN_HERE"              # Private token from portal
-FLAG_REGEX = re.compile(r"FLAG\{[A-Za-z0-9_\-]{16,64}\}") # Match flag pattern
+# 1. Submission protocol: "HTTP_JSON", "HTTP_FORM", or "TCP_SOCKET"
+SUBMISSION_PROTOCOL = "HTTP_JSON"
+SUBMIT_URL = "http://scoreboard.ctf/api/submit"  # Portal URL
+TEAM_TOKEN = "YOUR_TEAM_TOKEN_HERE"              # Private team key
+
+# 2. Your team IP (skipped during attacks)
+MY_TEAM_IP = "10.60.5.1"
+
+# 3. Service ports
+WEB_PORT = 8080
+WEB_PATH = "/api/v1/profile"
+PWN_PORT = 9999
+
+# 4. Tick duration in seconds (e.g. 120 for 2-min ticks, 180 for 3-min ticks)
+TICK_DURATION = 120
 ```
 
-### 2. `attack/targets.txt`
-Replace with list of opposing team IPs/hosts (omit your own team IP):
+### 2. `attack/targets.txt` (List of Enemy Targets)
+Open with: `nano attack/targets.txt`
+Paste the opposing team IPs or hostnames (one per line). Omit or comment out your own IP.
 ```text
 10.60.1.1
 10.60.2.1
 10.60.3.1
 ...
-```
-
-### 3. `attack/exploit_web.py`
-Set ports and insert exploit payload once a vulnerability is found:
-```python
-MY_TEAM_IP = "10.60.5.1"        # Your team's IP (skip self)
-SERVICE_PORT = 8080              # Target challenge port
-TARGET_PATH = "/api/v1/profile"  # Endpoint path
 ```
 
 ---
@@ -60,13 +65,13 @@ tmux
 ### Step 2: Lock Down & Launch Radars (00:05 - 00:15)
 Do not modify any challenge code yet. Run these background defenses:
 ```bash
-# 1. Snapshot services and initialize Git rollback
+# 1. Snapshot all services and enable Git rollback
 sudo ./defense/backup_services.sh
 
 # 2. Check network interface name (eth0, ens3, etc.)
 ip a
 
-# 3. Start the central flag submitter
+# 3. Start central flag submitter daemon
 python3 attack/submitter_daemon.py &
 
 # 4. Start Radar 2 (Enemy Packet Sniffer)
@@ -79,9 +84,9 @@ chmod +x defense/bot_watcher.sh && ./defense/bot_watcher.sh &
 
 ### Step 3: Discover Flag Sink & Endpoints (00:15 - 00:30)
 1. Check output in the Bot Watcher window:
-   - Identify active URLs visited by the bot (e.g. `POST /api/notes`, `GET /profile`).
+   - Note the active URLs visited by the bot (e.g. `POST /api/notes`, `GET /profile`).
    - Identify where the flag is placed (database table, `/flag.txt`, etc.).
-2. Update `attack/submitter_daemon.py` and `attack/targets.txt` with competition details.
+2. Update `attack/config.py` with the ports and paths discovered.
 
 ### Step 4: Attack Execution & Replay (00:30 Onward)
 1. Launch custom web or binary attacks:
@@ -89,7 +94,9 @@ chmod +x defense/bot_watcher.sh && ./defense/bot_watcher.sh &
    python3 attack/exploit_web.py
    python3 attack/exploit_pwn.py
    ```
-2. Counter-strike using enemy exploits:
+   *Optional CLI overrides: `python3 attack/exploit_web.py --port 5000 --path /api`*
+
+2. Counter-strike using enemy zero-days:
    When `traffic/sniffer.py` alerts an enemy attack, replay their exact payload:
    ```bash
    python3 attack/exploit_replay.py traffic/captured_exploits/<latest_dump>.bin --port 8080
@@ -117,9 +124,10 @@ chmod +x defense/bot_watcher.sh && ./defense/bot_watcher.sh &
 
 | File | Match Day Action |
 | :--- | :--- |
-| `attack/submitter_daemon.py` | Edit: Set `SUBMIT_URL` and `TEAM_TOKEN`. |
+| `attack/config.py` | Edit: Set `SUBMIT_URL`, `TEAM_TOKEN`, `MY_TEAM_IP`, `WEB_PORT`, `PWN_PORT`. |
 | `attack/targets.txt` | Edit: Paste list of opposing team IPs. |
-| `attack/exploit_web.py` | Edit: Set `SERVICE_PORT` and insert payload once found. |
+| `attack/exploit_web.py` | Run or edit: Customize payload in `attack_team()`. |
+| `attack/exploit_pwn.py` | Run or edit: Customize payload in `attack_team()`. |
 | `bootstrap/setup_pwnbox.sh` | Run only: `./setup_pwnbox.sh`. |
 | `defense/backup_services.sh`| Run only: `./backup_services.sh`. |
 | `defense/bot_watcher.sh` | Run only: `./bot_watcher.sh`. |

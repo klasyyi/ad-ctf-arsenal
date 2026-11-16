@@ -4,36 +4,43 @@ Lightweight, production-grade automation suite for 24-hour Attack & Defense CTF 
 
 ---
 
-## Repository Structure
+## Quickstart (Inside Pwnbox)
 
+```bash
+git clone https://github.com/klasyyi/ad-ctf-arsenal.git
+cd ad-ctf-arsenal
+chmod +x bootstrap/setup_pwnbox.sh && ./bootstrap/setup_pwnbox.sh
+source ~/.bashrc
+tmux
+```
+
+---
+
+## What to Configure at 10:00 AM (The Only 3 Files to Edit)
+
+### 1. `attack/submitter_daemon.py`
+Set scoreboard API endpoint and team secret token:
+```python
+SUBMIT_URL = "http://scoreboard.ctf/api/submit"  # Submission URL from portal
+TEAM_TOKEN = "YOUR_TEAM_TOKEN_HERE"              # Private token from portal
+FLAG_REGEX = re.compile(r"FLAG\{[A-Za-z0-9_\-]{16,64}\}") # Match flag pattern
+```
+
+### 2. `attack/targets.txt`
+Replace with list of opposing team IPs/hosts (omit your own team IP):
 ```text
-ad-ctf-arsenal/
-├── README.md                 # Match day protocol and command reference
-├── .gitignore                # Excludes runtime DBs, PCAPs, logs
-├── bootstrap/
-│   ├── setup_pwnbox.sh       # One-click bootstrap installer
-│   ├── tmux.conf             # Ergonomic tmux configuration
-│   └── aliases.sh            # Shell aliases (flaggrep, submit-flag, ports)
-├── attack/
-│   ├── submitter_daemon.py   # Flag submission queue with SQLite deduplication
-│   ├── exploit_web.py        # Web exploit runner (2.1s delay per target)
-│   ├── exploit_pwn.py        # Pwntools socket exploit runner (2.1s delay)
-│   ├── exploit_replay.py     # Replay engine for captured enemy payloads
-│   └── targets.txt           # Configurable target IP list
-├── defense/
-│   ├── backup_services.sh    # Initial service snapshot & Git initializer
-│   ├── bot_watcher.sh        # Radar 1: Real-time SLA bot request watcher
-│   ├── proxy_logger.py       # Zero-firewall Layer 7 proxy logger
-│   ├── waf_php_shim.php      # PHP WAF shim (safe 200 OK exits)
-│   └── waf_python_shim.py    # Python/Flask WAF shim (safe 200 OK exits)
-├── traffic/
-│   ├── sniffer.py            # Radar 2: Live packet sniffer & exploit dumper
-│   └── pcap_dump.sh          # Rolling 60s tcpdump ring buffer
-└── manual/
-    ├── FIRST_HOUR_CHECKLIST.md         # Minute-by-minute startup checklist
-    ├── GAME_DYNAMICS_AND_CHEATCODES.md # Bot tracking, exploit theft, SLA rules
-    ├── FIELD_MANUAL.md                 # Offline cheat sheet (SQLi, SSTI, Pwn)
-    └── PLAYBOOK.md                     # General rules and shift rotation
+10.60.1.1
+10.60.2.1
+10.60.3.1
+...
+```
+
+### 3. `attack/exploit_web.py`
+Set ports and insert exploit payload once a vulnerability is found:
+```python
+MY_TEAM_IP = "10.60.5.1"        # Your team's IP (skip self)
+SERVICE_PORT = 8080              # Target challenge port
+TARGET_PATH = "/api/v1/profile"  # Endpoint path
 ```
 
 ---
@@ -56,24 +63,25 @@ Do not modify any challenge code yet. Run these background defenses:
 # 1. Snapshot services and initialize Git rollback
 sudo ./defense/backup_services.sh
 
-# 2. Start the central flag submitter
+# 2. Check network interface name (eth0, ens3, etc.)
+ip a
+
+# 3. Start the central flag submitter
 python3 attack/submitter_daemon.py &
 
-# 3. Start Radar 2 (Enemy Packet Sniffer)
+# 4. Start Radar 2 (Enemy Packet Sniffer)
 sudo python3 traffic/sniffer.py eth0 &
 
-# 4. Start Radar 1 (Organizer Bot Watcher)
+# 5. Start Radar 1 (Organizer Bot Watcher)
 chmod +x defense/bot_watcher.sh && ./defense/bot_watcher.sh &
 ```
 *Check scoreboard: Confirm your services start GREEN.*
 
 ### Step 3: Discover Flag Sink & Endpoints (00:15 - 00:30)
 1. Check output in the Bot Watcher window:
-   - Identify the active URLs visited by the bot (e.g. `POST /api/notes`, `GET /profile`).
+   - Identify active URLs visited by the bot (e.g. `POST /api/notes`, `GET /profile`).
    - Identify where the flag is placed (database table, `/flag.txt`, etc.).
-2. Configure credentials:
-   - Open `attack/submitter_daemon.py` and set `SUBMIT_URL` and `TEAM_TOKEN`.
-   - Open `attack/targets.txt` and verify target IP range matches the scoreboard format.
+2. Update `attack/submitter_daemon.py` and `attack/targets.txt` with competition details.
 
 ### Step 4: Attack Execution & Replay (00:30 Onward)
 1. Launch custom web or binary attacks:
@@ -105,8 +113,22 @@ chmod +x defense/bot_watcher.sh && ./defense/bot_watcher.sh &
 
 ---
 
+## File Action Reference
+
+| File | Match Day Action |
+| :--- | :--- |
+| `attack/submitter_daemon.py` | Edit: Set `SUBMIT_URL` and `TEAM_TOKEN`. |
+| `attack/targets.txt` | Edit: Paste list of opposing team IPs. |
+| `attack/exploit_web.py` | Edit: Set `SERVICE_PORT` and insert payload once found. |
+| `bootstrap/setup_pwnbox.sh` | Run only: `./setup_pwnbox.sh`. |
+| `defense/backup_services.sh`| Run only: `./backup_services.sh`. |
+| `defense/bot_watcher.sh` | Run only: `./bot_watcher.sh`. |
+| `traffic/sniffer.py` | Run only: `python3 sniffer.py <iface>`. |
+
+---
+
 ## Core Rules Compliance
-- Anti-DDoS Throttling: `attack/exploit_web.py`, `exploit_pwn.py`, and `exploit_replay.py` enforce `time.sleep(2.1)` per target.
+- Anti-DDoS Throttling: All attack runners enforce `time.sleep(2.1)` per target.
 - Zero Firewall Changes: All defense tools operate strictly at Layer 7.
 - Non-Destructive: Exploits only read flags; no crashing or disrupting enemy services.
 - Internal Sniffing Only: Captures restricted strictly to local assigned interfaces (`eth0`, `docker0`).

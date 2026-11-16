@@ -106,15 +106,22 @@ def send_to_scoreboard(flag):
         return "ERROR", str(e)
 
 def process_queue():
-    if not os.path.exists(FLAG_FILE):
+    if not os.path.exists(FLAG_FILE) or os.path.getsize(FLAG_FILE) == 0:
         return
 
-    with open(FLAG_FILE, "r") as f:
-        content = f.read()
+    # Atomic rotation prevents race conditions where writers append while reading
+    proc_file = FLAG_FILE + ".proc"
+    try:
+        os.replace(FLAG_FILE, proc_file)
+    except OSError:
+        return
 
-    # Clear queue file immediately so concurrent writers can keep appending
-    with open(FLAG_FILE, "w") as f:
-        f.write("")
+    try:
+        with open(proc_file, "r") as f:
+            content = f.read()
+    finally:
+        if os.path.exists(proc_file):
+            os.remove(proc_file)
 
     raw_matches = FLAG_REGEX.findall(content)
     if not raw_matches:

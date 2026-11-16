@@ -16,7 +16,7 @@ import os
 import sys
 import time
 from datetime import datetime
-from collections import defaultdict
+from collections import OrderedDict
 from scapy.all import sniff, TCP, Raw, IP
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -29,8 +29,16 @@ os.makedirs(OUTPUT_DIR, exist_ok=True)
 FLAG_REGEX = re.compile(FLAG_REGEX_STR.encode())
 seen_flags = set()
 
-# Ring buffer storing recent incoming requests: (client_ip, target_port) -> bytes
-recent_incoming = defaultdict(bytes)
+# Bounded LRU buffer storing recent incoming requests: (client_ip, target_port) -> bytes
+MAX_BUFFER_ENTRIES = 1000
+recent_incoming = OrderedDict()
+
+def store_incoming(key, payload):
+    if key in recent_incoming:
+        recent_incoming.move_to_end(key)
+    recent_incoming[key] = payload
+    if len(recent_incoming) > MAX_BUFFER_ENTRIES:
+        recent_incoming.popitem(last=False)
 
 KNOWN_SERVICE_PORTS = {WEB_PORT, PWN_PORT, 80, 443, 8000, 8080, 9999}
 
@@ -46,10 +54,11 @@ def packet_callback(pkt):
 
     clean_my_ip = MY_TEAM_IP.strip()
 
-    # Track incoming client requests hitting our services
-    is_incoming = (dst_ip == clean_my_ip or dport in KNOWN_SERVICE_PORTS)
+    # Track incoming client requests hitting our services.
+    # Must NOT originate from our own IP (prevents our outgoing attacks from poisoning the buffer).
+    is_incoming = (dst_ip == clean_my_ip) or (src_ip != clean_my_ip and dport in KNOWN_SERVICE_PORTS)
     if is_incoming:
-        recent_incoming[(src_ip, dport)] = payload
+        store_incoming((src_ip, dport), payload)
 
     # Check for flags in this packet
     match = FLAG_REGEX.search(payload)

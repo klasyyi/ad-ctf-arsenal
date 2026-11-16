@@ -49,5 +49,7 @@ PER_TARGET_SLEEP = 2.1
 # ---------------------------------------------------------------------------
 # 5. FLAG PATTERN
 # Regex matching the competition flag format.
+# Verify format at game start (e.g. check prefix like FLAG{ or CTF{,
+# and check length boundaries {16,64} if flags are shorter/longer).
 # ---------------------------------------------------------------------------
-FLAG_REGEX_STR = r"FLAG\{[A-Za-z0-9_\-]{16,64}\}|[A-Z0-9]{32}="
+FLAG_REGEX_STR = r"(?:FLAG|CTF)\{[A-Za-z0-9_\-]{8,64}\}|[A-Z0-9]{32}="

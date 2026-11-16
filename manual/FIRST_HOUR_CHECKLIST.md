@@ -20,36 +20,40 @@ Do not touch or modify any challenge code yet.
    ```bash
    sudo ./defense/backup_services.sh
    ```
-2. Start background flag submitter:
+2. Check local network interface name:
+   ```bash
+   ip a
+   ```
+3. Start background flag submitter:
    ```bash
    python3 attack/submitter_daemon.py &
    ```
-3. Start Radar 2 (Enemy sniffer):
+4. Start Radar 2 (Enemy sniffer on your interface):
    ```bash
    sudo python3 traffic/sniffer.py eth0 &
    ```
-4. Start Radar 1 (Bot watcher):
+5. Start Radar 1 (Bot watcher):
    ```bash
    chmod +x defense/bot_watcher.sh && ./defense/bot_watcher.sh &
    ```
-5. Check scoreboard: Confirm all services are GREEN.
+6. Check scoreboard: Confirm all services are GREEN.
 
-## 00:15 - 00:30: Locate Flags via Bot Traffic
+## 00:15 - 00:30: Configuration & Flag Sink Discovery
 1. Check output in the Bot Watcher window:
-   - Identify endpoints called by the SLA bot (e.g., `POST /api/notes`, `POST /login`).
+   - Identify active endpoints called by the SLA bot (e.g., `POST /api/notes`, `GET /profile`).
    - Identify flag format and storage location (database table, `/flag.txt`, etc.).
-2. Update configuration files:
-   - Paste team token and submit URL into `attack/submitter_daemon.py`.
-   - Verify target IPs in `attack/targets.txt`.
+2. Configure the 2 core files:
+   - In `attack/config.py`: Set `SUBMISSION_PROTOCOL`, `SUBMIT_URL`, `TEAM_TOKEN`, `MY_TEAM_IP`, and service ports.
+   - In `attack/targets.txt`: Paste opposing team IPs (omit your own IP).
 
 ## 00:30 - 01:00: Role Assignment & Initial Exploitation
 1. Player 1 (Defense Lead):
    - Monitor `traffic/sniffer.py` and `defense/bot_watcher.sh`.
    - Check local code for obvious backdoors (`eval`, `system`, hardcoded credentials).
 2. Player 2 (Attack Lead):
-   - Target the active endpoints spotted by the Bot Watcher.
+   - Target active endpoints spotted by the Bot Watcher.
    - Test basic injections on localhost (SQLi, IDOR, Path Traversal).
-   - Once working, load payload into `attack/exploit_web.py` and run against all teams.
+   - Once working, test payload in `attack/exploit_web.py` and run against all teams.
 3. Player 3 (Reverser):
    - Load binary challenges into Ghidra.
    - Locate vulnerable functions and draft surgical patches.

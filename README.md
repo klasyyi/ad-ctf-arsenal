@@ -75,7 +75,7 @@ ad-ctf-arsenal/
 ├── s4dfarm_engine/              # Vendored S4DFarm engine (upstream C4T-BuT-S4D/S4DFarm)
 │   ├── server/                  #   farm server: web UI, dedup, quota, submission
 │   │   └── app/
-│   │       ├── config.py        #     TEAMS, FLAG_FORMAT, protocol, quota, password
+│   │       ├── config.py        #     THE single source: TEAMS, FLAG_FORMAT, ports, protocol, quota
 │   │       └── protocols/       #     submission protocols (one module per scoreboard)
 │   │           ├── faust.py ... volgactf.py   # shipped protocols
 │   │           ├── custom.py    #     TEMPLATE: edit for a custom scoreboard
@@ -85,13 +85,14 @@ ad-ctf-arsenal/
 ├── s4dfarm/                     # Adapter: the exploits S4DFarm runs
 │   ├── exploit_web.py           #   web sploit (print flags to stdout, exit)
 │   ├── exploit_pwn.py           #   pwn sploit (print flags to stdout, exit)
-│   ├── config.py                #   per-service ports/paths + FLAG_REGEX
+│   ├── config.py                #   derives FLAG_REGEX + ports from the server config
 │   └── INTEGRATION.md           #   full wiring notes
 ├── attack/
+│   ├── config.py                # derives shared values from server config (EXPIRED submitter fields local)
 │   ├── exploit_replay.py        # Replay a captured enemy payload (manual, keep)
-│   ├── submitter_daemon.py      # RETIRED under S4DFarm (standalone fallback only)
-│   ├── exploit_web.py           # RETIRED round-loop version (standalone fallback)
-│   ├── exploit_pwn.py           # RETIRED round-loop version (standalone fallback)
+│   ├── submitter_daemon.py      # EXPIRED under S4DFarm (break-glass fallback only)
+│   ├── exploit_web.py           # EXPIRED round-loop version (break-glass fallback)
+│   ├── exploit_pwn.py           # EXPIRED round-loop version (break-glass fallback)
 │   └── targets.txt              # Standalone target list (farm uses server TEAMS instead)
 ├── defense/
 │   ├── backup_services.sh       # Snapshot + git-init your services
@@ -113,11 +114,18 @@ ad-ctf-arsenal/
 
 ## Setup checklist
 
-### A. Farm server — `s4dfarm_engine/server/app/config.py` (farm owner, once)
+### A. The one file — `s4dfarm_engine/server/app/config.py` (farm owner, once)
 
-1. `TEAMS` — the real `{name: ip}` of every target team. This is the **only** place
-   team IPs go; the client reads them from here.
-2. `FLAG_FORMAT` — the real flag regex from the rules.
+This is the **single source of truth**. The farm reads it natively; the arsenal
+tools (`attack/config.py` → `s4dfarm/config.py`, plus `defense/` and `traffic/`)
+import the shared values from it. Edit here and nowhere else.
+
+1. `TEAMS` — the real `{name: ip}` of every target team. The only team list.
+2. `FLAG_FORMAT` — the real flag regex from the rules. Shared with every tool, so
+   the flag pattern is set here only (no second copy to keep in sync).
+   Set here too, shared with the exploits: `WEB_PORT` / `WEB_PATH`, `PWN_PORT`, and
+   — for the standalone/replay tools — `MY_TEAM_IP`, `PER_TARGET_SLEEP`,
+   `TICK_DURATION`.
 3. `SYSTEM_PROTOCOL` — how flags reach the scoreboard. Choose one:
    - a shipped module: `faust`, `ructf_http`, `ructf_tcp`, `ctf_moscow`,
      `ctfcup_tcp`, `volgactf`;
@@ -132,12 +140,20 @@ ad-ctf-arsenal/
 6. `SERVER_PASSWORD` — change it from the default.
 7. `TIMEZONE` — set to the game's timezone.
 
-### B. Adapter — `s4dfarm/` (each service owner)
+### B. Adapter — `s4dfarm/` (service owners)
 
-8. `s4dfarm/config.py` `FLAG_REGEX` — keep **identical** to the server `FLAG_FORMAT`.
-9. Per service: set the ports/paths in `s4dfarm/config.py` and write the payload
-   block in your `exploit_<service>.py`. Contract: `argv[1]` is the victim host,
-   steal the flag(s), `print()` each one, exit. No loop, no submitter.
+No config to edit here. `s4dfarm/config.py` and `attack/config.py` import the
+flag pattern and ports from the one file in section A, so there is nothing to
+keep in sync by hand — change a value in `server/app/config.py` and every tool
+and sploit picks it up on next launch.
+
+8. Leave `s4dfarm/config.py` and `attack/config.py` alone — they derive their
+   values from `server/app/config.py`. (Only the EXPIRED standalone submitter's
+   scoreboard fields still sit in `attack/config.py`, and you don't run it under
+   the farm.)
+9. Per service: write the payload block in your `s4dfarm/exploit_<service>.py`.
+   Contract: `argv[1]` is the victim host, steal the flag(s), `print()` each one,
+   exit. No loop, no submitter — the farm owns those.
 
 ### C. Defense (each service you run)
 

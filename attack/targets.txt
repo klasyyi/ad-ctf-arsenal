@@ -1,9 +1,13 @@
-# Target Teams List (One IP or hostname per line)
-# Update with the actual IP scheme provided by organizers
-10.60.1.1
+# Target Teams List
+# One IP per line.
+# IMPORTANT: Remove or comment out your own team IP.
+# Your IP is set in attack/config.py as MY_TEAM_IP.
+
+# 10.60.1.1   <- Example: uncomment your own team line to skip it
 10.60.2.1
 10.60.3.1
 10.60.4.1
+10.60.5.1
 10.60.6.1
 10.60.7.1
 10.60.8.1

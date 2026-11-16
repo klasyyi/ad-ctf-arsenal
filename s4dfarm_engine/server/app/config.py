@@ -2,16 +2,39 @@ import os
 
 # import validators.volgactf
 
+# ============================================================================
+# SINGLE SOURCE OF TRUTH - edit these at match start. This is the ONLY file.
+# The farm reads them through CONFIG below. The arsenal tools (attack/config.py
+# -> s4dfarm/config.py, plus defense/traffic) import this same file, so the
+# flag format, team IPs and service ports all live HERE, nowhere else.
+# ============================================================================
+
+# Real flag regex from the rules (replaces the stub default).
+# Examples: r'CTF\.Moscow\{[a-zA-Z\.0-9_-]+\}' , r'VolgaCTF{[\w-]*\.[\w-]*\.[\w-]*}'
+FLAG_FORMAT = r'[A-Z0-9]{31}='
+
+# Target teams: {name: ip}. The S4DFarm client reads this; the only team list.
+TEAMS = {
+    f'Team #{i}': f'10.60.{i}.3'
+    for i in range(0, 10)
+}
+
+# Service ports/paths (shared with the arsenal exploits via attack/config.py).
+WEB_PORT = 8080
+WEB_PATH = "/api/v1/profile"
+PWN_PORT = 9999
+
+# Standalone / replay tools only (the farm paces itself with --attack-period).
+MY_TEAM_IP = "10.60.5.1"     # your team IP, skipped during attacks
+PER_TARGET_SLEEP = 2.1       # per-target delay for standalone round-loop tools
+TICK_DURATION = 120          # round sleep for standalone round-loop tools
+# ============================================================================
+
 CONFIG = {
     'DEBUG': os.getenv('DEBUG') == '1',
 
-    'TEAMS': {
-        f'Team #{i}': f'10.60.{i}.3'
-        for i in range(0, 10)
-    },
-    # 'FLAG_FORMAT': r'CTF\.Moscow\{[a-zA-Z\.0-9_-]+\}',
-    # 'FLAG_FORMAT': r'VolgaCTF{[\w-]*\.[\w-]*\.[\w-]*}',
-    'FLAG_FORMAT': r'[A-Z0-9]{31}=',
+    'TEAMS': TEAMS,
+    'FLAG_FORMAT': FLAG_FORMAT,
 
     # ---- Flag submission protocol --------------------------------------
     # SYSTEM_PROTOCOL = one module name in app/protocols/. Shipped:

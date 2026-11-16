@@ -1,28 +1,26 @@
-# Runtime flag database and queue
-*.db
-*.sqlite
-*.sqlite3
-flags_queue.txt
-targets_runtime.txt
-
-# Traffic and logs
-*.pcap
-*.pcapng
-*.log
-traffic_l7.log
-php_waf_traffic.log
-php_blocked_attacks.log
-captured_exploits/
-
-# Python cache & venv
+# Runtime files - excluded from git
+attack/flags_queue.txt
+attack/submitted_flags.db
+attack/__pycache__/
+defense/__pycache__/
+traffic/__pycache__/
 __pycache__/
 *.py[cod]
 *$py.class
+*.db
+*.sqlite
+*.sqlite3
+
+# PCAP and log files
+*.pcap
+*.pcapng
+*.log
+traffic/captured_exploits/
+
+# Virtual envs and OS files
 .venv/
 venv/
 ENV/
-
-# Temporary / OS
 .DS_Store
 *.swp
 *~

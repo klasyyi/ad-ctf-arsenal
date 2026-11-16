@@ -1,14 +1,8 @@
 #!/usr/bin/env python3
 """
-================================================================================
-FLAG SUBMISSION DAEMON & QUEUE (DEF CON-GRADE)
-================================================================================
-Features:
-- Thread-safe FIFO flag queue.
-- Persistent SQLite database (eliminates duplicate submissions across restarts).
-- Supports both HTTP JSON API and raw TCP socket submission endpoints.
-- Auto-reconnect & failure retry with exponential backoff.
-- Pass '--local' to test against the local simulation arena!
+Flag Submission Daemon
+Reads flags from flags_queue.txt, submits them to the scoreboard,
+and stores results in SQLite to prevent duplicate submissions.
 """
 
 import time
@@ -20,23 +14,13 @@ import requests
 from datetime import datetime
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# ==========================================
-# COMPETITION CONFIGURATION (Update on Match Day)
-# ==========================================
-SUBMIT_URL = os.environ.get("SUBMIT_URL", "http://scoreboard.ctf/api/submit")
-TEAM_TOKEN = os.environ.get("TEAM_TOKEN", "YOUR_TEAM_TOKEN_HERE")
-
-# Allow easy local testing against sim_arena.py
-if "--local" in sys.argv:
-    SUBMIT_URL = "http://127.0.0.1:9000/api/submit"
-    TEAM_TOKEN = "TOKEN_TEAM1"
+sys.path.insert(0, BASE_DIR)
+from config import SUBMIT_URL, TEAM_TOKEN, FLAG_REGEX_STR
 
 FLAG_FILE = os.path.join(BASE_DIR, "flags_queue.txt")
 DB_FILE = os.path.join(BASE_DIR, "submitted_flags.db")
-
-FLAG_REGEX = re.compile(r"FLAG\{[A-Za-z0-9_\-]{16,64}\}|[A-Z0-9]{32}=")
-SUBMISSION_INTERVAL = 0.5  # Safe throttling between API calls
+FLAG_REGEX = re.compile(FLAG_REGEX_STR)
+SUBMISSION_INTERVAL = 0.5
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -76,14 +60,13 @@ def send_to_scoreboard(flag):
         payload = {"token": TEAM_TOKEN, "flag": flag}
         resp = requests.post(SUBMIT_URL, json=payload, timeout=4)
         body = resp.text.strip().lower()
-
         if any(w in body for w in ["accepted", "correct", "success", "congrat"]):
             return "ACCEPTED", resp.text.strip()
         elif any(w in body for w in ["already", "duplicate"]):
             return "DUPLICATE", resp.text.strip()
         elif any(w in body for w in ["expired", "old"]):
             return "EXPIRED", resp.text.strip()
-        elif any(w in body for w in ["invalid", "wrong", "cannot submit your own"]):
+        elif any(w in body for w in ["invalid", "wrong"]):
             return "INVALID", resp.text.strip()
         else:
             return "UNKNOWN", resp.text.strip()
@@ -93,45 +76,34 @@ def send_to_scoreboard(flag):
 def process_queue():
     if not os.path.exists(FLAG_FILE):
         return
-
     with open(FLAG_FILE, "r") as f:
         content = f.read()
-
-    # Clear queue file immediately so writers can keep appending
     with open(FLAG_FILE, "w") as f:
         f.write("")
-
     raw_matches = FLAG_REGEX.findall(content)
     if not raw_matches:
         return
-
     print(f"[*] Found {len(raw_matches)} flag(s) in queue...")
-
     for flag in raw_matches:
         if is_flag_processed(flag):
             continue
-
         status, resp_text = send_to_scoreboard(flag)
         record_flag(flag, status, resp_text)
-
         badge = "[+]" if status == "ACCEPTED" else "[-]"
         print(f"  {badge} [{status}] {flag} -> {resp_text}")
-
         time.sleep(SUBMISSION_INTERVAL)
 
 def main():
     print("=" * 60)
-    print("🚀 FLAG SUBMISSION DAEMON STARTED")
-    print(f"[*] Target Endpoint: {SUBMIT_URL}")
-    print(f"[*] Team Token:      {TEAM_TOKEN}")
-    print(f"[*] Queue File:      {FLAG_FILE}")
-    print(f"[*] Database:        {DB_FILE}")
+    print("FLAG SUBMISSION DAEMON STARTED")
+    print(f"[*] Submit URL: {SUBMIT_URL}")
+    print(f"[*] Team Token: {TEAM_TOKEN}")
+    print(f"[*] Queue File: {FLAG_FILE}")
+    print(f"[*] Database:   {DB_FILE}")
     print("=" * 60)
-    
     init_db()
     if not os.path.exists(FLAG_FILE):
         open(FLAG_FILE, "a").close()
-
     while True:
         try:
             process_queue()

@@ -8,11 +8,13 @@ Features:
 - Persistent SQLite database (eliminates duplicate submissions across restarts).
 - Supports both HTTP JSON API and raw TCP socket submission endpoints.
 - Auto-reconnect & failure retry with exponential backoff.
+- Pass '--local' to test against the local simulation arena!
 """
 
 import time
 import re
 import os
+import sys
 import sqlite3
 import requests
 from datetime import datetime
@@ -22,8 +24,14 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # ==========================================
 # COMPETITION CONFIGURATION (Update on Match Day)
 # ==========================================
-SUBMIT_URL = "http://scoreboard.ctf/api/submit"  # Or TCP host:port
-TEAM_TOKEN = "YOUR_TEAM_TOKEN_HERE"
+SUBMIT_URL = os.environ.get("SUBMIT_URL", "http://scoreboard.ctf/api/submit")
+TEAM_TOKEN = os.environ.get("TEAM_TOKEN", "YOUR_TEAM_TOKEN_HERE")
+
+# Allow easy local testing against sim_arena.py
+if "--local" in sys.argv:
+    SUBMIT_URL = "http://127.0.0.1:9000/api/submit"
+    TEAM_TOKEN = "TOKEN_TEAM1"
+
 FLAG_FILE = os.path.join(BASE_DIR, "flags_queue.txt")
 DB_FILE = os.path.join(BASE_DIR, "submitted_flags.db")
 
@@ -64,9 +72,6 @@ def record_flag(flag, status, response_text):
     conn.close()
 
 def send_to_scoreboard(flag):
-    """
-    HTTP JSON Submission (Adapt to match competition specs)
-    """
     try:
         payload = {"token": TEAM_TOKEN, "flag": flag}
         resp = requests.post(SUBMIT_URL, json=payload, timeout=4)
@@ -78,7 +83,7 @@ def send_to_scoreboard(flag):
             return "DUPLICATE", resp.text.strip()
         elif any(w in body for w in ["expired", "old"]):
             return "EXPIRED", resp.text.strip()
-        elif any(w in body for w in ["invalid", "wrong"]):
+        elif any(w in body for w in ["invalid", "wrong", "cannot submit your own"]):
             return "INVALID", resp.text.strip()
         else:
             return "UNKNOWN", resp.text.strip()
@@ -117,8 +122,10 @@ def process_queue():
 def main():
     print("=" * 60)
     print("🚀 FLAG SUBMISSION DAEMON STARTED")
-    print(f"[*] Queue File: {FLAG_FILE}")
-    print(f"[*] Database:   {DB_FILE}")
+    print(f"[*] Target Endpoint: {SUBMIT_URL}")
+    print(f"[*] Team Token:      {TEAM_TOKEN}")
+    print(f"[*] Queue File:      {FLAG_FILE}")
+    print(f"[*] Database:        {DB_FILE}")
     print("=" * 60)
     
     init_db()
